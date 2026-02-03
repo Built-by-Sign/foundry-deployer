@@ -1,0 +1,165 @@
+name: Reusable Deployment Workflow
+
+on:
+  workflow_call:
+    inputs:
+      network_name:
+        description: 'Human-readable network name'
+        required: true
+        type: string
+      chain_id:
+        description: 'Chain ID for deployment'
+        required: true
+        type: string
+      deploy_script:
+        description: 'Path to deployment script (e.g., script/Deploy.s.sol)'
+        required: true
+        type: string
+      deployment_category:
+        description: 'Deployment category for file organization'
+        required: true
+        type: string
+      evm_version:
+        description: 'EVM version for compilation'
+        required: false
+        type: string
+        default: 'cancun'
+      forge_flags:
+        description: 'Additional forge script flags'
+        required: false
+        type: string
+        default: ''
+      commit_deployment:
+        description: 'Whether to commit deployment artifacts'
+        required: false
+        type: boolean
+        default: true
+      commit_message:
+        description: 'Commit message for deployment artifacts'
+        required: false
+        type: string
+        default: 'chore: deployment artifacts'
+      prod_owner:
+        description: 'Production owner address'
+        type: string
+        required: false
+      mainnet_chain_ids:
+        description: 'Comma-separated list of mainnet chain IDs'
+        type: string
+        required: false
+      force_deploy:
+        description: 'Force deployment even on mainnet (true/false)'
+        type: string
+        required: false
+        default: ''
+      allowed_deployment_sender:
+        description: 'Allowed deployment sender address'
+        type: string
+        required: false
+    secrets:
+      rpc_url:
+        description: 'RPC endpoint URL'
+        required: true
+      deployment_private_key:
+        description: 'Private key for deployment'
+        required: true
+
+env:
+  PROD_OWNER: ${{ inputs.prod_owner || vars.PROD_OWNER }}
+  MAINNET_CHAIN_IDS: ${{ inputs.mainnet_chain_ids || vars.MAINNET_CHAIN_IDS }}
+  FORCE_DEPLOY: ${{ inputs.force_deploy != '' && inputs.force_deploy || vars.FORCE_DEPLOY }}
+  ALLOWED_DEPLOYMENT_SENDER: ${{ inputs.allowed_deployment_sender || vars.ALLOWED_DEPLOYMENT_SENDER }}
+
+concurrency:
+  group: deploy-${{ inputs.chain_id }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Install dependencies
+        run: forge install
+
+      - name: Configure foundry.toml EVM version
+        env:
+          EVM_VERSION: ${{ inputs.evm_version }}
+        run: |
+          FOUNDRY_CONFIG="foundry.toml"
+
+          # Backup original foundry.toml
+          cp "$FOUNDRY_CONFIG" "${FOUNDRY_CONFIG}.bak"
+
+          # Check if evm_version already exists
+          if grep -q "^evm_version" "$FOUNDRY_CONFIG"; then
+            # Replace existing (GNU sed on Ubuntu runners)
+            sed -i "s/^evm_version = .*/evm_version = \"$EVM_VERSION\"/" "$FOUNDRY_CONFIG"
+          else
+            # Add after solc_version line (awk for cross-platform portability)
+            awk -v evm="evm_version = \"$EVM_VERSION\"" '/^solc_version = / {print; print evm; next} 1' "$FOUNDRY_CONFIG" > "${FOUNDRY_CONFIG}.tmp"
+            mv "${FOUNDRY_CONFIG}.tmp" "$FOUNDRY_CONFIG"
+          fi
+
+          echo "Modified foundry.toml with EVM version: $EVM_VERSION"
+          echo "EVM suffix will be auto-detected from foundry.toml during deployment"
+          grep -A 1 "solc_version" "$FOUNDRY_CONFIG"
+
+      - name: Run deployment script
+        env:
+          DEPLOY_SCRIPT: ${{ inputs.deploy_script }}
+          RPC_URL: ${{ secrets.rpc_url }}
+          DEPLOYMENT_PRIVATE_KEY: ${{ secrets.deployment_private_key }}
+          FORGE_FLAGS: ${{ inputs.forge_flags }}
+          DEPLOYMENT_CATEGORY: ${{ inputs.deployment_category }}
+        run: |
+          forge script "$DEPLOY_SCRIPT" \
+            --rpc-url "$RPC_URL" \
+            --private-key "$DEPLOYMENT_PRIVATE_KEY" \
+            --broadcast \
+            $FORGE_FLAGS
+
+      - name: Restore modified files
+        if: always()
+        run: |
+          # Restore foundry.toml
+          if [ -f "foundry.toml.bak" ]; then
+            mv "foundry.toml.bak" "foundry.toml"
+            echo "Restored original foundry.toml"
+          fi
+
+      - name: Check for changes
+        id: git-check
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push changes
+        if: steps.git-check.outputs.changes == 'true' && inputs.commit_deployment == true
+        env:
+          COMMIT_MESSAGE: ${{ inputs.commit_message }}
+          NETWORK_NAME: ${{ inputs.network_name }}
+          CHAIN_ID: ${{ inputs.chain_id }}
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add deployments/
+
+          # Build commit message
+          COMMIT_MSG="$COMMIT_MESSAGE for $NETWORK_NAME (chain $CHAIN_ID)"
+
+          git commit -m "$COMMIT_MSG"
+          git push

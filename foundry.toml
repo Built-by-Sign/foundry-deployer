@@ -1,0 +1,27 @@
+[profile.default]
+src = "src"
+script = "script"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.20"
+optimizer = true
+optimizer_runs = 200
+
+fs_permissions = [
+    { access = "read-write", path = "./deployments/" },
+    { access = "read", path = "./" }
+]
+
+# FFI is required for:
+# - whoami command (deployment tracking)
+# - forge verify-contract --show-standard-json-input (verification JSON generation)
+ffi = true
+
+# Gas reports for key contracts
+gas_reports = ["DeployHelper", "CreateXHelper"]
+
+[profile.ci]
+verbosity = 2
+ffi = false
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

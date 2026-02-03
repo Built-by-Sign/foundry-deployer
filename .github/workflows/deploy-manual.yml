@@ -1,0 +1,90 @@
+name: Manual Deployment Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: 'Target network'
+        required: true
+        type: choice
+        options:
+          - mainnet
+          - sepolia
+          - holesky
+      deploy_script:
+        description: 'Path to deployment script (e.g., script/Deploy.s.sol)'
+        required: true
+        type: string
+        default: 'script/Deploy.s.sol'
+      deployment_category:
+        description: 'Deployment category for file organization'
+        required: true
+        type: choice
+        default: 'default'
+        options:
+          - default
+      evm_version:
+        description: 'EVM version for compilation'
+        required: false
+        type: string
+        default: 'cancun'
+      forge_flags:
+        description: 'Additional forge script flags'
+        required: false
+        type: string
+        default: ''
+      commit_deployment:
+        description: 'Whether to commit deployment artifacts'
+        required: false
+        type: boolean
+        default: true
+      commit_message:
+        description: 'Commit message for deployment artifacts'
+        required: false
+        type: string
+        default: 'chore: deployment artifacts'
+
+jobs:
+  resolve-network:
+    runs-on: ubuntu-latest
+    outputs:
+      network_name: ${{ steps.network.outputs.network_name }}
+      chain_id: ${{ steps.network.outputs.chain_id }}
+    steps:
+      - name: Set network configuration
+        id: network
+        run: |
+          case "${{ inputs.network }}" in
+            mainnet)
+              echo "chain_id=1" >> $GITHUB_OUTPUT
+              echo "network_name=Ethereum Mainnet" >> $GITHUB_OUTPUT
+              ;;
+            sepolia)
+              echo "chain_id=11155111" >> $GITHUB_OUTPUT
+              echo "network_name=Sepolia" >> $GITHUB_OUTPUT
+              ;;
+            holesky)
+              echo "chain_id=17000" >> $GITHUB_OUTPUT
+              echo "network_name=Holesky" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "Error: Unknown network ${{ inputs.network }}"
+              exit 1
+              ;;
+          esac
+
+  deploy:
+    needs: resolve-network
+    uses: ./.github/workflows/deploy.yml
+    with:
+      network_name: ${{ needs.resolve-network.outputs.network_name }}
+      chain_id: ${{ needs.resolve-network.outputs.chain_id }}
+      deploy_script: ${{ inputs.deploy_script }}
+      deployment_category: ${{ inputs.deployment_category }}
+      evm_version: ${{ inputs.evm_version }}
+      forge_flags: ${{ inputs.forge_flags }}
+      commit_deployment: ${{ inputs.commit_deployment }}
+      commit_message: ${{ inputs.commit_message }}
+    secrets:
+      deployment_private_key: ${{ secrets.DEPLOYMENT_PRIVATE_KEY }}
+      rpc_url: ${{ inputs.network == 'mainnet' && secrets.MAINNET_RPC_URL || inputs.network == 'sepolia' && secrets.SEPOLIA_RPC_URL || secrets.HOLESKY_RPC_URL }}
