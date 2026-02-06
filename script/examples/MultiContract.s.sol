@@ -14,9 +14,7 @@ contract ExampleToken is Versionable, Ownable {
     string public symbol = "EXT";
     uint256 public totalSupply;
 
-    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {
-        // Don't initialize owner here - will be initialized after deployment
-    }
+    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {}
 
     function initializeOwner(address _owner) external {
         require(owner() == address(0), "Already initialized");
@@ -25,7 +23,6 @@ contract ExampleToken is Versionable, Ownable {
 
     function mint(uint256 amount) external onlyOwner {
         totalSupply += amount;
-        // simplified: no actual balance tracking
     }
 
     function _baseVersion() internal pure override returns (string memory) {
@@ -40,9 +37,7 @@ contract ExampleToken is Versionable, Ownable {
 contract ExampleVault is Versionable, Ownable {
     address public token;
 
-    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {
-        // Don't initialize owner here - will be initialized after deployment
-    }
+    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {}
 
     function initializeOwner(address _owner) external {
         require(owner() == address(0), "Already initialized");
@@ -67,9 +62,7 @@ contract ExampleRouter is Versionable, Ownable {
     address public vault;
     bool public initialized;
 
-    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {
-        // Don't initialize owner here - will be initialized after deployment
-    }
+    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {}
 
     function initializeOwner(address _owner) external {
         require(owner() == address(0), "Already initialized");
@@ -90,11 +83,15 @@ contract ExampleRouter is Versionable, Ownable {
 
 /**
  * @title MultiContract
- * @notice Example deployment script showing multi-contract deployment
+ * @notice Example deployment script showing multi-contract deployment with atomic init
  * @dev This demonstrates:
- *      - Deploying multiple contracts
- *      - Initializing contracts with cross-references
+ *      - Deploying multiple contracts with atomic initialization
+ *      - Initializing contracts with cross-references (requires ownership)
  *      - Managing ownership for multiple contracts
+ *
+ *      Atomic init is needed here because setToken() and initialize() are onlyOwner.
+ *      Without atomic init, an attacker could front-run and claim ownership between
+ *      deployment and initialization.
  */
 contract MultiContract is DeployHelper {
     function setUp() public override {
@@ -104,22 +101,20 @@ contract MultiContract is DeployHelper {
         _setUp("multi", broadcaster);
     }
 
+    /// @notice Atomic initialization: deploy and call initializeOwner in one transaction
+    /// @dev Required because post-deploy cross-reference calls (setToken, initialize) need ownership
+    function _getPostDeployInitData() internal override returns (bytes memory) {
+        return abi.encodeWithSignature("initializeOwner(address)", _deployer);
+    }
+
     function run() public {
-        // Wrap all deployment and initialization calls in broadcast
-        // This ensures transactions are recorded when using --broadcast flag
-        // SECURITY: Never hardcode private keys. Use:
-        //   forge script ... --private-key $PRIVATE_KEY
-        // or hardware wallet: --ledger / --trezor
         vm.startBroadcast(_deployer);
         _assertBroadcastSenderMatchesDeployer();
 
-        // Deploy multiple contracts using CREATE3
-        // EVM suffix is auto-detected from foundry.toml
         address token = deploy(abi.encodePacked(type(ExampleToken).creationCode, abi.encode(_getEvmSuffix())));
         address vault = deploy(abi.encodePacked(type(ExampleVault).creationCode, abi.encode(_getEvmSuffix())));
         address router = deploy(abi.encodePacked(type(ExampleRouter).creationCode, abi.encode(_getEvmSuffix())));
 
-        // Initialize contracts with cross-references
         if (ExampleVault(vault).token() == address(0)) {
             ExampleVault(vault).setToken(token);
         }
@@ -127,12 +122,10 @@ contract MultiContract is DeployHelper {
             ExampleRouter(router).initialize(token, vault);
         }
 
-        // Transfer ownership for all contracts on mainnet
         _checkChainAndSetOwner(token);
         _checkChainAndSetOwner(vault);
         _checkChainAndSetOwner(router);
 
-        // Save all deployment artifacts
         _afterAll();
 
         vm.stopBroadcast();

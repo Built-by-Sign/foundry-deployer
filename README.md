@@ -36,13 +36,8 @@ import {Versionable} from "foundry-deployer/Versionable.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 
 contract MyContract is Versionable, Ownable {
-    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {
-        // Owner will be initialized after deployment by DeployHelper
-    }
-
-    function initializeOwner(address _owner) external {
-        require(owner() == address(0), "Already initialized");
-        _initializeOwner(_owner);
+    constructor(string memory evmSuffix_, address owner_) Versionable(evmSuffix_) {
+        _initializeOwner(owner_);
     }
 
     function _baseVersion() internal pure override returns (string memory) {
@@ -69,9 +64,10 @@ contract DeployMyContract is DeployHelper {
         vm.startBroadcast();
 
         // EVM suffix is auto-detected from foundry.toml
+        // Owner is set in constructor — no atomic init needed
         bytes memory creationCode = abi.encodePacked(
             type(MyContract).creationCode,
-            abi.encode(_getEvmSuffix())
+            abi.encode(_getEvmSuffix(), msg.sender)
         );
 
         address deployed = deploy(creationCode);
@@ -122,8 +118,8 @@ The EVM suffix is automatically detected from `foundry.toml` using the active `F
 
 ## Documentation
 
-- 📖 [Getting Started Guide](./docs/GETTING_STARTED.md) - Step-by-step tutorial
-- 📚 [API Reference](./docs/API_REFERENCE.md) - Complete API documentation
+- [Getting Started Guide](./docs/GETTING_STARTED.md)
+- [API Reference](./docs/API_REFERENCE.md)
 
 ## How It Works
 
@@ -145,7 +141,23 @@ With EVM suffix: "1.0.0-MyContract-cancun"
 With custom suffix: "1.0.0-MyContract-cancun-beta"
 ```
 
-The EVM suffix is automatically detected from `foundry.toml` at deployment time and passed to contracts via constructor parameters, allowing the same codebase to be deployed with version strings that reflect the target EVM version.
+### Atomic Deploy+Init
+
+For contracts that use post-deploy initialization (e.g., `initializeOwner(address)` instead of constructor-based ownership), there is a front-running risk: an attacker could call `initializeOwner()` between deployment and your initialization transaction.
+
+Foundry Deployer supports **atomic deploy+init** via CreateX's `deployCreate3AndInit`, which deploys and initializes in a single transaction. To enable it, override `_getPostDeployInitData()`:
+
+```solidity
+contract MyDeploy is DeployHelper {
+    function _getPostDeployInitData() internal virtual override returns (bytes memory) {
+        return abi.encodeWithSignature("initializeOwner(address)", _deployer);
+    }
+}
+```
+
+**Default behavior:** Plain `deployCreate3` with no post-deploy init call. This is safe for contracts that set their owner in the constructor. Override `_getPostDeployInitData()` to return non-empty calldata when you need atomic initialization.
+
+See [`script/examples/AtomicDeployment.s.sol`](./script/examples/AtomicDeployment.s.sol) for a complete example.
 
 ### Deployment Tracking
 
@@ -189,8 +201,9 @@ jobs:
 
 See the [examples directory](./script/examples/) for complete examples:
 
-- **[SimpleDeployment.s.sol](./script/examples/SimpleDeployment.s.sol)** - Basic single-contract deployment
-- **[MultiContract.s.sol](./script/examples/MultiContract.s.sol)** - Multi-contract deployment with initialization
+- **[SimpleDeployment.s.sol](./script/examples/SimpleDeployment.s.sol)** - Basic single-contract deployment (constructor-based ownership)
+- **[MultiContract.s.sol](./script/examples/MultiContract.s.sol)** - Multi-contract deployment with atomic init and cross-references
+- **[AtomicDeployment.s.sol](./script/examples/AtomicDeployment.s.sol)** - Atomic deploy+init for front-running prevention
 
 ## Advanced Features
 

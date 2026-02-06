@@ -1,7 +1,5 @@
 # API Reference
 
-Complete API documentation for foundry-deployer.
-
 ## Table of Contents
 
 - [DeployHelper](#deployhelper)
@@ -29,9 +27,7 @@ contract MyDeploy is DeployHelper {
         _setUp("category");
     }
 
-    function run() public {
-        // Your deployment logic
-    }
+    function run() public { ... }
 }
 ```
 
@@ -52,21 +48,39 @@ function setUp() public override {
 }
 ```
 
-#### `_setUp(string memory subfolder)`
+#### `_setUp(string memory subfolder, address deployer)`
 
 ```solidity
-function _setUp(string memory subfolder) internal withCreateX
+function _setUp(string memory subfolder, address deployer) internal withCreateX
 ```
 
-Initialize the deployment helper with a category name.
+Initialize the deployment helper with a category name and explicit deployer address.
 
 **Parameters:**
 - `subfolder`: Deployment category for organizing files (e.g., "production", "staging")
+- `deployer`: Explicit deployer address (used for salt computation and ownership)
 
 **What it does:**
 - Reads environment variables from `.env`
 - Sets up JSON file paths
 - Initializes CreateX integration
+
+**Example:**
+```solidity
+_setUp("my-contracts", msg.sender);
+// Creates deployments in: deployments/my-contracts/
+```
+
+#### `_setUp(string memory subfolder)`
+
+```solidity
+function _setUp(string memory subfolder) internal
+```
+
+Convenience wrapper that calls `_setUp(subfolder, msg.sender)`.
+
+**Parameters:**
+- `subfolder`: Deployment category for organizing files (e.g., "production", "staging")
 
 **Example:**
 ```solidity
@@ -97,11 +111,7 @@ Deploy a contract using CREATE3.
 - Logs deployment status
 - Tracks deployment in JSON
 - Generates verification files
-- Uses atomic deploy+init via CreateX's `deployCreate3AndInit` to prevent front-running
-
-**✅ Security Note:**
-
-Deployment and initialization now happen atomically in a single transaction using CreateX's `deployCreate3AndInit`. This prevents front-running attacks where an attacker could claim ownership between deployment and initialization.
+- Uses plain `deployCreate3` by default; override `_getPostDeployInitData()` to enable atomic deploy+init via `deployCreate3AndInit`
 
 **Example:**
 ```solidity
@@ -133,8 +143,9 @@ Core deployment function with additional control.
 );
 
 if (isNew) {
-    // Initialize new deployment
-    MyContract(addr).initialize();
+    // Post-deploy setup (e.g., cross-contract references)
+    // For ownership init, prefer atomic deploy+init via _getPostDeployInitData()
+    MyContract(addr).configure(someParam);
 }
 ```
 
@@ -258,17 +269,17 @@ function _getPostDeployInitData() internal virtual returns (bytes memory)
 Get initialization data for atomic deploy+init.
 
 **Returns:**
-- Calldata to execute after deployment (executed atomically via `deployCreate3AndInit`)
+- Calldata to execute after deployment (executed atomically via `deployCreate3AndInit`), or empty bytes for plain `deployCreate3`
 
 **Default Implementation:**
 ```solidity
-return abi.encodeWithSignature("initializeOwner(address)", _deployer);
+return ""; // Plain deployCreate3, no post-deploy init
 ```
 
-**Override to skip initialization:**
+**Override to enable atomic initialization:**
 ```solidity
-function _getPostDeployInitData() internal pure override returns (bytes memory) {
-    return ""; // Empty bytes = skip init, use plain deployCreate3
+function _getPostDeployInitData() internal virtual override returns (bytes memory) {
+    return abi.encodeWithSignature("initializeOwner(address)", _deployer);
 }
 ```
 
@@ -304,49 +315,6 @@ function _getDeployValues() internal pure override returns (ICreateX.Values memo
     });
 }
 ```
-
-#### `_initializeOwnerAfterDeploy(address deployed)`
-
-```solidity
-function _initializeOwnerAfterDeploy(address deployed) internal virtual
-```
-
-**⚠️ DEPRECATED:** This hook is now a no-op. Override `_getPostDeployInitData()` instead.
-
-The old hook design was incompatible with atomic deploy+init since the deployed address doesn't exist yet at call time. This function is kept for backwards compatibility but does nothing by default.
-
-**Migration:** If you previously overrode this function, migrate to `_getPostDeployInitData()`:
-
-**Old approach (deprecated):**
-```solidity
-function _initializeOwnerAfterDeploy(address deployed) internal override {
-    // Skip initialization
-}
-```
-
-**New approach:**
-```solidity
-function _getPostDeployInitData() internal pure override returns (bytes memory) {
-    return ""; // Return empty bytes to skip init
-}
-```
-
-#### `_setUp(string memory subfolder)`
-
-Already covered in [Setup Methods](#_setupstring-memory-subfolder).
-
-#### `_afterAll()`
-
-Already covered in [Utility Methods](#_afterall).
-
-#### `_checkChainAndSetOwner(address instance)`
-
-Already covered in [Utility Methods](#_checkchainandsetowneraddress-instance).
-
-#### `_getSalt(string memory version)`
-
-Already covered in [Utility Methods](#_getsaltstring-memory-version).
-
 ---
 
 ### Public Variables
@@ -456,13 +424,8 @@ import {Versionable} from "foundry-deployer/Versionable.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 
 contract MyContract is Versionable, Ownable {
-    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {
-        // Owner will be initialized after deployment by DeployHelper
-    }
-
-    function initializeOwner(address _owner) external {
-        require(owner() == address(0), "Already initialized");
-        _initializeOwner(_owner);
+    constructor(string memory evmSuffix_, address owner_) Versionable(evmSuffix_) {
+        _initializeOwner(owner_);
     }
 
     function _baseVersion() internal pure override returns (string memory) {
@@ -477,7 +440,7 @@ contract MyContract is Versionable, Ownable {
 // EVM suffix is auto-detected from foundry.toml
 bytes memory creationCode = abi.encodePacked(
     type(MyContract).creationCode,
-    abi.encode(_getEvmSuffix())
+    abi.encode(_getEvmSuffix(), _deployer)
 );
 address deployed = deploy(creationCode);
 ```
@@ -512,13 +475,8 @@ The recommended way to implement `IVersionable` is to extend the `Versionable` a
 
 ```solidity
 contract MyContract is Versionable, Ownable {
-    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {
-        // Owner will be initialized after deployment by DeployHelper
-    }
-
-    function initializeOwner(address _owner) external {
-        require(owner() == address(0), "Already initialized");
-        _initializeOwner(_owner);
+    constructor(string memory evmSuffix_, address owner_) Versionable(evmSuffix_) {
+        _initializeOwner(owner_);
     }
 
     function _baseVersion() internal pure override returns (string memory) {
@@ -754,19 +712,6 @@ function run() public {
 ```
 
 **Note:** Each unique constructor argument set creates a different deployment address.
-
----
-
-## Best Practices
-
-1. **Always implement IVersionable**: Ensures version tracking works correctly
-2. **Use semantic versioning**: Follow `major.minor.patch` format
-3. **Call _afterAll() last**: Save artifacts after all deployments complete
-4. **Test locally first**: Use Anvil to test deployment scripts
-5. **Document custom overrides**: Comment why you're overriding virtual methods
-6. **Validate addresses**: Use `computeDeploymentAddress()` to verify before deploying
-7. **Handle errors gracefully**: Use try-catch for initialization calls
-8. **Version on bytecode changes**: Increment version when constructor args or code changes
 
 ---
 

@@ -9,8 +9,6 @@ import {IVersionable} from "../src/interfaces/IVersionable.sol";
 import {ICreateX} from "../src/interfaces/ICreateX.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 
-// Test contracts: Constructors don't initialize owner - owner initialized post-deployment
-
 contract MockContract is Versionable, Ownable {
     uint256 public value;
 
@@ -34,7 +32,6 @@ contract MockContractWithArgs is Versionable, Ownable {
     uint256 public value;
 
     constructor(string memory evmSuffix_, uint256 _value) Versionable(evmSuffix_) {
-        // Don't initialize owner here - will be initialized after deployment
         value = _value;
     }
 
@@ -123,10 +120,14 @@ contract PayableInitContract is Versionable, Ownable {
     }
 }
 
-// Test deployment helper
+// Test deployment helper — uses atomic init for contracts with initializeOwner pattern
 contract TestDeployHelper is DeployHelper {
     function setUp() public override {
         _setUp("test");
+    }
+
+    function _getPostDeployInitData() internal virtual override returns (bytes memory) {
+        return abi.encodeWithSignature("initializeOwner(address)", _deployer);
     }
 
     function setUpWithDeployer(string memory subfolder, address deployer) public {
@@ -195,6 +196,21 @@ contract TestDeployHelper is DeployHelper {
     }
 }
 
+contract DefaultBehaviorDeployHelper is DeployHelper {
+    function setUp() public override {
+        _setUp("test");
+    }
+
+    function deployMockContract() public returns (address) {
+        bytes memory creationCode = abi.encodePacked(type(MockContract).creationCode, abi.encode(_getEvmSuffix()));
+        return deploy(creationCode);
+    }
+
+    function _shouldSkipStandardJsonInput() internal pure override returns (bool) {
+        return true;
+    }
+}
+
 // Helper that skips initialization (for contracts with constructor-based ownership)
 contract NoInitDeployHelper is DeployHelper {
     function setUp() public override {
@@ -207,7 +223,7 @@ contract NoInitDeployHelper is DeployHelper {
         return deploy(creationCode);
     }
 
-    // Override to return empty bytes (no post-deploy init)
+    // No post-deploy init
     function _getPostDeployInitData() internal pure override returns (bytes memory) {
         return "";
     }
@@ -229,6 +245,7 @@ contract PayableNoInitDeployHelper is DeployHelper {
         return ICreateX.Values({constructorAmount: 1 ether, initCallAmount: 0});
     }
 
+    // No post-deploy init
     function _getPostDeployInitData() internal pure override returns (bytes memory) {
         return "";
     }
@@ -315,6 +332,10 @@ abstract contract StandardJsonGuardBase is DeployHelper {
         _setUp("test");
     }
 
+    function _getPostDeployInitData() internal virtual override returns (bytes memory) {
+        return abi.encodeWithSignature("initializeOwner(address)", _deployer);
+    }
+
     function deployMockContract() public returns (address) {
         bytes memory creationCode = abi.encodePacked(type(MockContract).creationCode, abi.encode(_getEvmSuffix()));
         return deploy(creationCode);
@@ -360,6 +381,10 @@ contract StandardJsonGuardNoSkip is StandardJsonGuardBase {
 contract RealStandardJsonCheckHelper is DeployHelper {
     function setUp() public override {
         _setUp("test");
+    }
+
+    function _getPostDeployInitData() internal virtual override returns (bytes memory) {
+        return abi.encodeWithSignature("initializeOwner(address)", _deployer);
     }
 
     function deployMockContract() public returns (address) {
@@ -734,12 +759,12 @@ contract DeployHelperTest is Test {
     }
 
     // Tests for atomic deploy+init functionality
-    function test_AtomicDeployInit_DefaultBehavior() public {
-        // Default behavior should initialize owner atomically
+    function test_AtomicDeployInit_ExplicitOverride() public {
+        // TestDeployHelper overrides _getPostDeployInitData to return initializeOwner calldata
         address deployed = helper.deployMockContract();
 
         assertTrue(deployed.code.length > 0, "Contract should have code");
-        assertEq(MockContract(deployed).owner(), deployer, "Owner should be set atomically");
+        assertEq(MockContract(deployed).owner(), deployer, "Owner should be set atomically via override");
     }
 
     function test_NoInitOverride_SkipsInitialization() public {
@@ -750,6 +775,20 @@ contract DeployHelperTest is Test {
 
         assertTrue(deployed.code.length > 0, "Contract should have code");
         assertEq(ConstructorOwnedContract(deployed).owner(), deployer, "Owner should be set in constructor");
+    }
+
+    function test_DefaultBehavior_NoInitialization() public {
+        DefaultBehaviorDeployHelper defaultHelper = new DefaultBehaviorDeployHelper();
+        defaultHelper.setUp();
+
+        address deployed = defaultHelper.deployMockContract();
+
+        assertTrue(deployed.code.length > 0, "Contract should have code");
+        assertEq(
+            MockContract(deployed).owner(),
+            address(0),
+            "Owner should NOT be initialized with default empty _getPostDeployInitData"
+        );
     }
 
     function test_CustomInitOverride_UsesCustomOwner() public {
@@ -1362,8 +1401,8 @@ contract InitAmountWithoutInitDataHelper is DeployHelper {
         return ICreateX.Values({constructorAmount: 0, initCallAmount: 1 ether});
     }
 
+    // No post-deploy init
     function _getPostDeployInitData() internal pure override returns (bytes memory) {
-        // Empty init data
         return "";
     }
 

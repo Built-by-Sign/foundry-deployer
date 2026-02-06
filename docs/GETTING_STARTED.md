@@ -1,7 +1,5 @@
 # Getting Started with Foundry Deployer
 
-This guide will walk you through setting up and using foundry-deployer for your Solidity projects.
-
 ## Prerequisites
 
 - [Foundry](https://getfoundry.sh/) installed
@@ -52,13 +50,8 @@ import {Ownable} from "solady/auth/Ownable.sol";
 contract MyFirstContract is Versionable, Ownable {
     uint256 public value;
 
-    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {
-        // Owner will be initialized after deployment by DeployHelper
-    }
-
-    function initializeOwner(address _owner) external {
-        require(owner() == address(0), "Already initialized");
-        _initializeOwner(_owner);
+    constructor(string memory evmSuffix_, address owner_) Versionable(evmSuffix_) {
+        _initializeOwner(owner_);
     }
 
     function setValue(uint256 _value) external onlyOwner {
@@ -70,13 +63,6 @@ contract MyFirstContract is Versionable, Ownable {
     }
 }
 ```
-
-**Key Points:**
-- Extend `Versionable` abstract contract
-- Accept EVM suffix as constructor parameter
-- Override `_baseVersion()` to return base version string
-- Use `Ownable` from solady for ownership management
-- Keep constructors lightweight; version extraction performs a temporary deployment (side effects are reverted, but expensive or external calls can still fail/slow down scripts)
 
 ### Step 2: Create a Deployment Script
 
@@ -100,9 +86,10 @@ contract DeployMyFirstContract is DeployHelper {
 
         // Deploy using CREATE3
         // EVM suffix is auto-detected from foundry.toml
+        // Owner is set in the constructor — no atomic init needed
         bytes memory creationCode = abi.encodePacked(
             type(MyFirstContract).creationCode,
-            abi.encode(_getEvmSuffix())
+            abi.encode(_getEvmSuffix(), msg.sender)
         );
         address deployed = deploy(creationCode);
 
@@ -212,22 +199,6 @@ forge script script/DeployMyFirstContract.s.sol \
   --verify
 ```
 
-## Understanding CREATE3 Deployment
-
-### How CREATE3 Works
-
-CREATE3 provides deterministic contract addresses:
-
-1. **Salt Generation**: A unique salt is generated from your deployer address + version string
-2. **Address Computation**: The deployment address is computed before deployment
-3. **Deployment**: Contract is deployed using CREATE3 to the pre-computed address
-
-### Benefits
-
-- **Cross-chain Consistency**: Same address on different networks
-- **Version Isolation**: Each version gets a unique address
-- **No Nonce Dependency**: Deploy contracts in any order
-
 ### Computing Addresses in Advance
 
 ```solidity
@@ -239,7 +210,7 @@ contract DeployMyFirstContract is DeployHelper {
     function run() public {
         bytes memory creationCode = abi.encodePacked(
             type(MyFirstContract).creationCode,
-            abi.encode(_getEvmSuffix())
+            abi.encode(_getEvmSuffix(), msg.sender)
         );
 
         vm.startBroadcast();
@@ -259,8 +230,6 @@ contract DeployMyFirstContract is DeployHelper {
 ```
 
 ## Working with EVM Versions
-
-Different chains support different EVM versions. Foundry Deployer makes it easy to deploy the same contract with different EVM targets.
 
 ### Version String Result
 
@@ -309,6 +278,11 @@ contract DeployMultiple is DeployHelper {
 }
 ```
 
+> **Note:** If `setToken` and `initialize` are `onlyOwner` functions, you need ownership
+> established first. Either use constructor-based ownership (pass `_deployer` as a constructor
+> argument) or override `_getPostDeployInitData()` for atomic initialization.
+> See `script/examples/MultiContract.s.sol` for a complete example with atomic init.
+
 All three contracts will be saved in the same JSON file with their respective versions.
 
 ## Troubleshooting
@@ -353,40 +327,33 @@ fs_permissions = [{ access = "read-write", path = "./deployments/" }]
 
 ## Next Steps
 
-- 📚 Read the [API Reference](./API_REFERENCE.md) for advanced features
-- 🔄 Learn about [GitHub Actions Integration](../README.md#github-actions-integration)
-- 🔧 Explore [Custom Deployment Logic](./API_REFERENCE.md#custom-deployment-logic)
-
-## Best Practices
-
-1. **Version Your Contracts**: Always implement `IVersionable` with semantic versioning
-2. **Test Locally First**: Deploy to Anvil before testnets
-3. **Use Deployment Categories**: Organize deployments with meaningful categories (`production`, `staging`, etc.)
-4. **Commit Deployment Artifacts**: Track `deployments/` in git for deployment history
-5. **Verify on Etherscan**: Use `--verify` flag with deployments
-6. **Document Network-Specific Config**: Note which chains use which EVM versions
+- [API Reference](./API_REFERENCE.md)
+- [GitHub Actions Integration](../README.md#github-actions-integration)
+- [Custom Deployment Logic](./API_REFERENCE.md#custom-deployment-logic)
 
 ## Security Considerations
 
 ### Atomic Deploy+Init Protection
 
-**✅ Built-in Protection:** Foundry Deployer uses CreateX's `deployCreate3AndInit` to perform deployment and initialization atomically in a single transaction. This prevents front-running attacks where an attacker could claim ownership between deployment and initialization.
+**Opt-in Protection:** For contracts that use post-deploy initialization (e.g., `initializeOwner(address)`), Foundry Deployer supports atomic deploy+init via CreateX's `deployCreate3AndInit`. This prevents front-running attacks where an attacker could claim ownership between deployment and initialization.
+
+**Default behavior:** Plain `deployCreate3` with no post-deploy init call. This is safe for contracts that set their owner in the constructor.
+
+**Enable atomic init** by overriding `_getPostDeployInitData()`:
+```solidity
+contract AtomicDeploy is DeployHelper {
+    function _getPostDeployInitData() internal virtual override returns (bytes memory) {
+        return abi.encodeWithSignature("initializeOwner(address)", _deployer);
+    }
+}
+```
 
 **How it works:**
 1. Deployment and `initializeOwner()` call happen in one transaction
 2. No window for attackers to intercept ownership
-3. Falls back to plain `deployCreate3` when no initialization is needed
+3. Plain `deployCreate3` is used when `_getPostDeployInitData()` returns empty bytes (the default)
 
 ### Custom Initialization
-
-**Skip initialization** (for constructor-based ownership):
-```solidity
-contract CustomDeploy is DeployHelper {
-    function _getPostDeployInitData() internal pure override returns (bytes memory) {
-        return ""; // Empty bytes = no post-deploy init
-    }
-}
-```
 
 **Custom init data** (different initialization logic):
 ```solidity

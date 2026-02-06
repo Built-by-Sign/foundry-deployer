@@ -7,15 +7,12 @@ import {Versionable} from "../../src/Versionable.sol";
 import {IVersionable} from "../../src/interfaces/IVersionable.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 
-// Example contracts for E2E testing
 contract E2EToken is Versionable, Ownable {
     string public name = "Test Token";
     string public symbol = "TEST";
     uint256 public totalSupply;
 
-    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {
-        // Don't initialize owner here - will be initialized after deployment
-    }
+    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {}
 
     function initializeOwner(address _owner) external {
         require(owner() == address(0), "Already initialized");
@@ -34,9 +31,7 @@ contract E2EToken is Versionable, Ownable {
 contract E2EVault is Versionable, Ownable {
     address public token;
 
-    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {
-        // Don't initialize owner here - will be initialized after deployment
-    }
+    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {}
 
     function initializeOwner(address _owner) external {
         require(owner() == address(0), "Already initialized");
@@ -57,9 +52,7 @@ contract E2ERouter is Versionable, Ownable {
     address public vault;
     bool public initialized;
 
-    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {
-        // Don't initialize owner here - will be initialized after deployment
-    }
+    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {}
 
     function initializeOwner(address _owner) external {
         require(owner() == address(0), "Already initialized");
@@ -78,7 +71,7 @@ contract E2ERouter is Versionable, Ownable {
     }
 }
 
-// E2E deployment script
+// E2E deployment script — uses atomic init for contracts with initializeOwner pattern
 contract E2EDeployScript is DeployHelper {
     address public tokenAddr;
     address public vaultAddr;
@@ -86,6 +79,10 @@ contract E2EDeployScript is DeployHelper {
 
     function setUp() public override {
         _setUp("e2e-test");
+    }
+
+    function _getPostDeployInitData() internal virtual override returns (bytes memory) {
+        return abi.encodeWithSignature("initializeOwner(address)", _deployer);
     }
 
     function run() public {
@@ -125,7 +122,10 @@ contract E2EDeployScriptSplitPhases is DeployHelper {
         _setUp("e2e-test");
     }
 
-    // Phase 1: Deploy contracts only (no ownership transfer)
+    function _getPostDeployInitData() internal virtual override returns (bytes memory) {
+        return abi.encodeWithSignature("initializeOwner(address)", _deployer);
+    }
+
     function deployOnly() public {
         tokenAddr = deploy(abi.encodePacked(type(E2EToken).creationCode, abi.encode(_getEvmSuffix())));
         vaultAddr = deploy(abi.encodePacked(type(E2EVault).creationCode, abi.encode(_getEvmSuffix())));
@@ -142,7 +142,6 @@ contract E2EDeployScriptSplitPhases is DeployHelper {
         }
     }
 
-    // Phase 2: Transfer ownership
     function transferOwnership() public {
         _checkChainAndSetOwner(tokenAddr);
         _checkChainAndSetOwner(vaultAddr);

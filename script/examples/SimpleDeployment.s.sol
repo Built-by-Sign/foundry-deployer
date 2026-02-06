@@ -8,18 +8,14 @@ import {Ownable} from "solady/auth/Ownable.sol";
 /**
  * @title MyContract
  * @notice Example contract that implements IVersionable
- * @dev This is a simple example contract to demonstrate the deployment system
+ * @dev Constructor-based ownership: owner is set in the constructor,
+ *      so no post-deploy initialization is needed. This is the simplest pattern.
  */
 contract MyContract is Versionable, Ownable {
     uint256 public value;
 
-    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {
-        // Don't initialize owner here - will be initialized after deployment
-    }
-
-    function initializeOwner(address _owner) external {
-        require(owner() == address(0), "Already initialized");
-        _initializeOwner(_owner);
+    constructor(string memory evmSuffix_, address owner_) Versionable(evmSuffix_) {
+        _initializeOwner(owner_);
     }
 
     function setValue(uint256 _value) external onlyOwner {
@@ -33,11 +29,7 @@ contract MyContract is Versionable, Ownable {
 
 /**
  * @title SimpleDeployment
- * @notice Example deployment script showing basic usage of foundry-deployer
- * @dev This demonstrates:
- *      - Basic contract deployment
- *      - Ownership transfer on mainnet
- *      - Deployment artifact saving
+ * @notice Basic single-contract deployment with constructor-based ownership
  */
 contract SimpleDeployment is DeployHelper {
     function setUp() public override {
@@ -48,23 +40,14 @@ contract SimpleDeployment is DeployHelper {
     }
 
     function run() public {
-        // Wrap all deployment calls in broadcast
-        // This ensures transactions are recorded when using --broadcast flag
-        // SECURITY: Never hardcode private keys. Use:
-        //   forge script ... --private-key $PRIVATE_KEY
-        // or hardware wallet: --ledger / --trezor
         vm.startBroadcast(_deployer);
         _assertBroadcastSenderMatchesDeployer();
 
-        // Deploy contract using CREATE3
-        // EVM suffix is auto-detected from foundry.toml
-        bytes memory creationCode = abi.encodePacked(type(MyContract).creationCode, abi.encode(_getEvmSuffix()));
+        bytes memory creationCode =
+            abi.encodePacked(type(MyContract).creationCode, abi.encode(_getEvmSuffix(), _deployer));
         address deployed = deploy(creationCode);
 
-        // Transfer ownership on mainnet (automatic based on MAINNET_CHAIN_IDS)
         _checkChainAndSetOwner(deployed);
-
-        // Save deployment artifacts to JSON
         _afterAll();
 
         vm.stopBroadcast();

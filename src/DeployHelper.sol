@@ -22,7 +22,6 @@ abstract contract DeployHelper is CreateXHelper {
     using strings for strings.slice;
     using stdToml for string;
 
-    // Custom errors
     error SetupNotOverridden();
     error SetupNotCalled();
     error AddressMismatch(address computed, address deployed);
@@ -40,7 +39,6 @@ abstract contract DeployHelper is CreateXHelper {
     error InitAmountWithoutInitData(uint256 initCallAmount);
     error MockDeploymentFailed();
 
-    // Constants for salt protection flags
     bytes1 internal constant CROSSCHAIN_FLAG_DISABLED = 0x01;
     bytes1 internal constant CROSSCHAIN_FLAG_ENABLED = 0x00;
     bytes1 internal constant ZERO_ADDRESS_MARKER = 0x00;
@@ -75,7 +73,6 @@ abstract contract DeployHelper is CreateXHelper {
     /// @notice Whether _setUp() has been called
     bool internal _isSetUp;
 
-    // Environment variables
     /// @notice Production owner address (set via PROD_OWNER env var)
     address internal _PROD_OWNER;
 
@@ -125,7 +122,6 @@ abstract contract DeployHelper is CreateXHelper {
     function _setUp(string memory subfolder, address deployer) internal withCreateX {
         deploymentCategory = subfolder;
 
-        // Set explicit deployer address
         _deployer = deployer;
 
         // Read environment variables from .env
@@ -134,7 +130,6 @@ abstract contract DeployHelper is CreateXHelper {
         uint256[] memory emptyChainIds;
         _MAINNET_CHAIN_IDS = vm.envOr("MAINNET_CHAIN_IDS", ",", emptyChainIds);
         if (_MAINNET_CHAIN_IDS.length == 0) revert EmptyMainnetChainIds();
-        // Populate mapping for O(1) lookup
         for (uint256 i = 0; i < _MAINNET_CHAIN_IDS.length; i++) {
             _isMainnetChain[_MAINNET_CHAIN_IDS[i]] = true;
         }
@@ -174,7 +169,6 @@ abstract contract DeployHelper is CreateXHelper {
         // Compute and cache EVM suffix from foundry.toml
         _evmSuffix = _computeEvmSuffix();
 
-        // Mark setup as complete
         _isSetUp = true;
     }
 
@@ -249,14 +243,17 @@ abstract contract DeployHelper is CreateXHelper {
     /**
      * @notice Get initialization data for atomic deploy+init
      * @return initData Calldata to execute after deployment (via regular call in CreateX)
-     * @dev Virtual to allow customization. Default returns calldata for initializeOwner(address).
-     *      Override to return empty bytes to skip initialization, or custom calldata for different logic.
-     *
-     *      WARNING: Skipping initialization creates frontrunning risk. Only skip if the contract
-     *      sets its owner in the constructor or has other protections.
+     * @dev Virtual to allow customization. Default returns empty bytes (plain deployCreate3).
+     *      Override to return calldata for atomic deploy+init via deployCreate3AndInit.
+     *      For example, to atomically initialize ownership after deployment:
+     *        return abi.encodeWithSignature("initializeOwner(address)", _deployer);
+     * @dev SECURITY: If your contract uses post-deploy initialization (e.g., initializeOwner),
+     *      you MUST override this function. Without atomic init, there is a window between
+     *      deployment and initialization where an attacker can front-run and claim ownership.
+     *      Prefer constructor-based ownership when possible to avoid this risk entirely.
      */
     function _getPostDeployInitData() internal virtual returns (bytes memory) {
-        return abi.encodeWithSignature("initializeOwner(address)", _deployer);
+        return "";
     }
 
     /**

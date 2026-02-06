@@ -23,7 +23,6 @@ abstract contract CreateXHelper is Script {
     /// @notice CreateX interface instance
     ICreateX internal constant createX = ICreateX(CREATEX_ADDRESS);
 
-    // Custom errors
     error CreateXDeploymentFailed();
     error UnexpectedCodeAtCreateXAddress();
     error CreateXNotDeployedOnChain(uint256 chainId);
@@ -74,18 +73,10 @@ abstract contract CreateXHelper is Script {
     function _isCreateXDeployed() internal view returns (bool) {
         bytes32 codeHash = CREATEX_ADDRESS.codehash;
 
-        // CreateX is deployed
         if (codeHash == CREATEX_EXTCODEHASH) return true;
-
-        // No code at address (empty account)
-        if (codeHash == EMPTY_ACCOUNT_HASH) {
-            return false;
-        }
-
-        // Non-existent account
+        if (codeHash == EMPTY_ACCOUNT_HASH) return false;
         if (codeHash == 0) return false;
 
-        // Different code at CreateX address - this shouldn't happen
         revert UnexpectedCodeAtCreateXAddress();
     }
 

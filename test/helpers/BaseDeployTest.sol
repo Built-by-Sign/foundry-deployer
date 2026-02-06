@@ -20,7 +20,6 @@ abstract contract BaseDeployTest is Test {
      */
     function initializeContractOwner(address contractAddress, address owner) internal {
         require(Ownable(contractAddress).owner() == address(0), "Already initialized");
-        // Call the contract's initializeOwner function
         (bool success,) = contractAddress.call(abi.encodeWithSignature("initializeOwner(address)", owner));
         require(success, "initializeOwner call failed");
     }
@@ -52,9 +51,7 @@ abstract contract BaseDeployTest is Test {
 abstract contract BaseMockContract is Versionable, Ownable {
     uint256 public value;
 
-    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {
-        // Don't initialize owner here - will be initialized after deployment
-    }
+    constructor(string memory evmSuffix_) Versionable(evmSuffix_) {}
 
     function initializeOwner(address _owner) external {
         require(owner() == address(0), "Already initialized");

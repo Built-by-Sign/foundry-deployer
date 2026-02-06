@@ -4,11 +4,8 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {CreateXHelper} from "../src/CreateXHelper.sol";
 
-// Test contract for CreateXHelper
 contract TestCreateXHelper is CreateXHelper {
-    function setUp() public {
-        // No explicit setup needed - withCreateX modifier handles it
-    }
+    function setUp() public {}
 
     function testEnsureCreateX() public withCreateX {
         // If this function runs, CreateX was successfully ensured
