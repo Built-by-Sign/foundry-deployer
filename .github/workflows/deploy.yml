@@ -56,6 +56,11 @@ on:
         description: 'Allowed deployment sender address'
         type: string
         required: false
+      version_postfix:
+        description: 'Postfix appended to VERSION constants in Solidity source before compilation (e.g., -beta, -rc1)'
+        type: string
+        required: false
+        default: ''
     secrets:
       rpc_url:
         description: 'RPC endpoint URL'
@@ -115,6 +120,18 @@ jobs:
           echo "EVM suffix will be auto-detected from foundry.toml during deployment"
           grep -A 1 "solc_version" "$FOUNDRY_CONFIG"
 
+      - name: Apply version postfix
+        if: inputs.version_postfix != ''
+        env:
+          VERSION_POSTFIX: ${{ inputs.version_postfix }}
+        run: |
+          grep -rl 'string public constant VERSION' src/ --include="*.sol" | while read file; do
+            cp "$file" "${file}.version-bak"
+            sed -i "s/\(string public constant VERSION = \"[^\"]*\)\";/\1${VERSION_POSTFIX}\";/" "$file"
+            echo "Applied postfix to $file:"
+            grep 'string public constant VERSION' "$file"
+          done
+
       - name: Run deployment script
         env:
           DEPLOY_SCRIPT: ${{ inputs.deploy_script }}
@@ -137,6 +154,13 @@ jobs:
             mv "foundry.toml.bak" "foundry.toml"
             echo "Restored original foundry.toml"
           fi
+
+          # Restore VERSION-modified Solidity files
+          for bakfile in $(find src/ -name "*.version-bak" 2>/dev/null); do
+            original="${bakfile%.version-bak}"
+            mv "$bakfile" "$original"
+            echo "Restored $original"
+          done
 
       - name: Check for changes
         id: git-check
