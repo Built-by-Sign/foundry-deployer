@@ -236,6 +236,7 @@ abstract contract DeployHelper is CreateXHelper {
         // This ensures the file is created after interrupted runs where
         // contracts exist on-chain but the JSON was never written to disk.
         if (bytes(finalJsonLatest).length > 0) {
+            vm.createDir(string.concat(vm.projectRoot(), "/deployments/", deploymentCategory), true);
             vm.writeJson(finalJsonLatest, jsonPathLatest);
         }
 
