@@ -400,6 +400,45 @@ contract RealStandardJsonCheckHelper is DeployHelper {
     }
 }
 
+// Helper for testing verification JSON recovery after interrupted CI.
+// Uses a dedicated subfolder ("recovery-test") to avoid file-system interference
+// with other tests through Forge's vm.revertToState() snapshot mechanism.
+contract VerificationRecoveryHelper is DeployHelper {
+    string internal constant MOCK_STANDARD_JSON =
+        '{"language":"Solidity","sources":{},"settings":{"optimizer":{"enabled":true}}}';
+
+    function setUp() public override {
+        _setUp("recovery-test");
+    }
+
+    function _getPostDeployInitData() internal virtual override returns (bytes memory) {
+        return abi.encodeWithSignature("initializeOwner(address)", _deployer);
+    }
+
+    function deployMockContract() public returns (address) {
+        bytes memory creationCode = abi.encodePacked(type(MockContract).creationCode, abi.encode(_getEvmSuffix()));
+        return deploy(creationCode);
+    }
+
+    function _shouldSkipStandardJsonInput() internal pure override returns (bool) {
+        return false;
+    }
+
+    // Return deterministic JSON without FFI
+    function _generateStandardJsonInput(string memory) internal pure override returns (string memory) {
+        return MOCK_STANDARD_JSON;
+    }
+
+    function getStandardJsonPath() public view returns (string memory) {
+        string memory versionAndVariant = string.concat("1.0.0-MockContract", _getEvmSuffix());
+        return _getStandardJsonInputPath(deploymentCategory, versionAndVariant);
+    }
+
+    function getMockStandardJson() public pure returns (string memory) {
+        return MOCK_STANDARD_JSON;
+    }
+}
+
 contract DeployHelperTest is Test {
     TestDeployHelper public helper;
     address public deployer;
@@ -1220,6 +1259,52 @@ contract DeployHelperTest is Test {
         // Restore original env vars
         vm.setEnv("SKIP_STANDARD_JSON_INPUT", originalSkipStandardJson);
         vm.setEnv("FORCE_DEPLOY", originalForceDeploy);
+    }
+
+    function test_VerificationJsonRecoveredAfterInterruptedCI() public {
+        // Save original env vars
+        string memory originalSkipStandardJson = vm.envOr("SKIP_STANDARD_JSON_INPUT", string("true"));
+
+        vm.setEnv("SKIP_STANDARD_JSON_INPUT", "false");
+
+        VerificationRecoveryHelper recoveryHelper = new VerificationRecoveryHelper();
+        recoveryHelper.setUp();
+
+        string memory outputPath = recoveryHelper.getStandardJsonPath();
+
+        // Clean up any pre-existing file
+        if (vm.isFile(outputPath)) vm.removeFile(outputPath);
+
+        // Step 1: Deploy the contract (standard JSON saved to disk)
+        recoveryHelper.deployMockContract();
+        assertTrue(vm.isFile(outputPath), "Standard JSON should exist after first deploy");
+
+        // Step 2: Delete the verification JSON (simulating interrupted CI)
+        vm.removeFile(outputPath);
+        assertFalse(vm.isFile(outputPath), "Standard JSON should be deleted");
+
+        // Step 3: Re-deploy the same contract (already exists on-chain, early return)
+        recoveryHelper.deployMockContract();
+
+        // Step 4: Assert the verification JSON was recovered
+        assertTrue(vm.isFile(outputPath), "Standard JSON should be recovered after re-deploy");
+
+        // Verify content matches the mock
+        string memory recovered = vm.readFile(outputPath);
+        assertEq(
+            keccak256(bytes(recovered)),
+            keccak256(bytes(recoveryHelper.getMockStandardJson())),
+            "Recovered JSON content should match"
+        );
+
+        // Clean up standard JSON and deployment artifacts from the isolated subfolder
+        if (vm.isFile(outputPath)) vm.removeFile(outputPath);
+        string memory latestPath =
+            string.concat(vm.projectRoot(), "/deployments/recovery-test/", vm.toString(block.chainid), "-latest.json");
+        if (vm.isFile(latestPath)) vm.removeFile(latestPath);
+
+        // Restore original env vars
+        vm.setEnv("SKIP_STANDARD_JSON_INPUT", originalSkipStandardJson);
     }
 
     function test_MainnetChainMapping_O1Lookup() public {
