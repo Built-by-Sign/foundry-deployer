@@ -232,11 +232,16 @@ abstract contract DeployHelper is CreateXHelper {
             return;
         }
 
+        // Always persist the cumulative -latest.json when it has content.
+        // This ensures the file is created after interrupted runs where
+        // contracts exist on-chain but the JSON was never written to disk.
+        if (bytes(finalJsonLatest).length > 0) {
+            vm.writeJson(finalJsonLatest, jsonPathLatest);
+        }
+
+        // Only write the timestamped diff file for actual new deployments
         if (_hasNewDeployments) {
             vm.writeJson(finalJson, jsonPath);
-            if (bytes(finalJsonLatest).length > 0) {
-                vm.writeJson(finalJsonLatest, jsonPathLatest);
-            }
         }
     }
 
