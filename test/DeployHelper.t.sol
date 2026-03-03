@@ -400,13 +400,15 @@ contract RealStandardJsonCheckHelper is DeployHelper {
     }
 }
 
-// Helper for testing verification JSON recovery after interrupted CI
+// Helper for testing verification JSON recovery after interrupted CI.
+// Uses a dedicated subfolder ("recovery-test") to avoid file-system interference
+// with other tests through Forge's vm.revertToState() snapshot mechanism.
 contract VerificationRecoveryHelper is DeployHelper {
     string internal constant MOCK_STANDARD_JSON =
         '{"language":"Solidity","sources":{},"settings":{"optimizer":{"enabled":true}}}';
 
     function setUp() public override {
-        _setUp("test");
+        _setUp("recovery-test");
     }
 
     function _getPostDeployInitData() internal virtual override returns (bytes memory) {
@@ -1295,8 +1297,11 @@ contract DeployHelperTest is Test {
             "Recovered JSON content should match"
         );
 
-        // Clean up
+        // Clean up standard JSON and deployment artifacts from the isolated subfolder
         if (vm.isFile(outputPath)) vm.removeFile(outputPath);
+        string memory latestPath =
+            string.concat(vm.projectRoot(), "/deployments/recovery-test/", vm.toString(block.chainid), "-latest.json");
+        if (vm.isFile(latestPath)) vm.removeFile(latestPath);
 
         // Restore original env vars
         vm.setEnv("SKIP_STANDARD_JSON_INPUT", originalSkipStandardJson);
