@@ -466,6 +466,21 @@ abstract contract DeployHelper is CreateXHelper {
                 console.log(
                     unicode"⚠️[WARN] Skipping deployment, %s already deployed at %s", versionAndVariant, computed
                 );
+
+                // Persist verification JSON if missing (e.g. after interrupted CI runs)
+                if (!_shouldSkipStandardJsonInput()) {
+                    string memory outputPath = _getStandardJsonInputPath(subfolder, versionAndVariant);
+                    if (!vm.isFile(outputPath)) {
+                        string memory sjInput = _generateStandardJsonInput(name);
+                        if (bytes(sjInput).length > 0) {
+                            console.log(
+                                unicode"🔄[INFO] Recovering missing verification input for %s", versionAndVariant
+                            );
+                            _saveContractToStandardJsonInput(versionAndVariant, subfolder, sjInput);
+                        }
+                    }
+                }
+
                 return (false, computed);
             }
 
@@ -781,6 +796,22 @@ abstract contract DeployHelper is CreateXHelper {
     }
 
     /**
+     * @notice Construct the standard JSON input file path for a given version and subfolder
+     * @param subfolder Deployment category
+     * @param versionAndVariant Version string for file naming
+     * @return path Full file path to the standard JSON input file
+     */
+    function _getStandardJsonInputPath(string memory subfolder, string memory versionAndVariant)
+        internal
+        view
+        returns (string memory)
+    {
+        return string.concat(
+            vm.projectRoot(), "/deployments/", subfolder, "/standard-json-inputs/", versionAndVariant, ".json"
+        );
+    }
+
+    /**
      * @notice Save contract verification JSON to file
      * @param versionAndVariant Version string for file naming
      * @param subfolder Deployment category
@@ -796,7 +827,7 @@ abstract contract DeployHelper is CreateXHelper {
         string memory outputDir = string.concat(vm.projectRoot(), "/deployments/", subfolder, "/standard-json-inputs");
         vm.createDir(outputDir, true);
 
-        string memory outputPath = string.concat(outputDir, "/", versionAndVariant, ".json");
+        string memory outputPath = _getStandardJsonInputPath(subfolder, versionAndVariant);
 
         if (vm.isFile(outputPath) && _FORCE_DEPLOY) {
             outputPath = string.concat(
@@ -832,9 +863,7 @@ abstract contract DeployHelper is CreateXHelper {
         string memory subfolder,
         string memory standardJsonInput
     ) internal view virtual {
-        string memory outputPath = string.concat(
-            vm.projectRoot(), "/deployments/", subfolder, "/standard-json-inputs/", versionAndVariant, ".json"
-        );
+        string memory outputPath = _getStandardJsonInputPath(subfolder, versionAndVariant);
 
         if (vm.isFile(outputPath)) {
             console.log(
