@@ -18,6 +18,10 @@
 
 ## Quick Start
 
+The fastest way to get started is to use the [foundry-deployer-template](https://github.com/Built-by-Sign/foundry-deployer-template) to create a new repository with everything pre-configured.
+
+Alternatively, install into an existing project:
+
 ### Installation
 
 ```bash
@@ -266,6 +270,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Credits
 
-Built by [EthSign](https://github.com/EthSign) for the Foundry ecosystem.
+Built by [Sign](https://github.com/Built-by-Sign) for the Foundry ecosystem.
 
 Based on deployment infrastructure from [TokenTable](https://tokentable.xyz).
