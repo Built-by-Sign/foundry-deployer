@@ -186,4 +186,24 @@ jobs:
           COMMIT_MSG="$COMMIT_MESSAGE for $NETWORK_NAME (chain $CHAIN_ID)"
 
           git commit -m "$COMMIT_MSG"
-          git push
+
+          BRANCH_NAME="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-$(git branch --show-current)}}"
+          if [ -z "$BRANCH_NAME" ]; then
+            echo "Unable to determine target branch for deployment artifact push"
+            exit 1
+          fi
+
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${BRANCH_NAME}"; then
+              exit 0
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "Failed to push deployment artifacts after $attempt attempts"
+              exit 1
+            fi
+
+            echo "Push rejected; fetching ${BRANCH_NAME}, rebasing, and retrying..."
+            git fetch --no-tags --depth=50 origin "${BRANCH_NAME}"
+            git rebase "origin/${BRANCH_NAME}"
+          done
